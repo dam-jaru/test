@@ -1,0 +1,232 @@
+<html>
+    <head>
+        <meta charset="UTF-8">
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/3.6.0/jquery.min.js"></script>
+        <script type="text/javascript" src="https://cdnjs.cloudflare.com/ajax/libs/jquery-cookie/1.4.1/jquery.cookie.min.js"></script>
+        <script>
+            const api_url='https://highskill.ru/test/yii2/web/index.php';
+            var doc = 'main_table_block';
+            var answer = false;
+            $(document).ready(async function(event) {  
+                if (!!$.cookie('token')) {// если есть кука, то отправим запрос на получение данных
+                    doc = 'main_table_block';
+                    answer = await api_request('main_table', $.cookie('token'));
+                    show_answer(answer);
+                } else {// нет куки, даем форму авторизации
+                    $('#auth_error').text('');
+                    $('#main').html($('#auth_form')[0].outerHTML);
+                }
+                $('form[name=auth_form]').submit( async function(event) {
+                    event.preventDefault();
+                    var token = await api_request('authorization', false, $('form[name=auth_form]').serializeArray());
+                    if(token){
+                        let tok = token['data']['token'];
+                        $.cookie('token', tok, { expires: 7, path: '/test/' });
+                        doc = 'main_table_block';
+                        answer = await api_request('main_table', $.cookie('token'));
+                        show_answer(answer);
+                    }
+                });
+                $(document).on('submit','form.cform_user',async function(event){
+                    event.preventDefault();
+                    answer = await api_request('user_save', $.cookie('token'), $(this).serializeArray());
+                    if(answer){
+                        doc = 'main_table_block';
+                        answer = await api_request('main_table', $.cookie('token'));
+                        show_answer(answer);
+                    }
+                });
+                $('#main').on('click','.act',async function(){
+                    let data = [{"name": "id", "value": $(this).data('id')},
+                                {"name": "act", "value": $(this).data('action')}];
+                    if($(this).data('action') == 'editname' || $(this).data('action') == 'editlogin'){
+                        let newval = prompt("Enter new value:");
+                        if(newval && newval.length > 0) data.push({"name": "newval", "value": newval});
+                        else return false;
+                    }
+                    await api_request($(this).data('action'), $.cookie('token'), data);
+                    answer = await api_request('main_table', $.cookie('token'));
+                    show_answer(answer);
+                    return false;
+                });
+                $('#main').on('click','#exit', function(){
+                    $.removeCookie('token', { path: '/test/' });
+                    $('#auth_error').text('');
+                    $('#main').html($('#auth_form')[0].outerHTML);
+                    return false;
+                });
+                $('#main').on('click','.go_back',async function(){
+                    answer = await api_request('main_table', $.cookie('token'));
+                    show_answer(answer);
+                    return false;
+                });
+                $('#main').on('click','.user_form',async function(){
+                    if($(this).data('id') > 0){
+                        let data = [{"name": "id", "value": $(this).data('id')}];
+                        answer = await api_request('user_form', $.cookie('token'), data);
+                    }
+                    else{
+                        answer = await api_request('user_form', $.cookie('token'));
+                    }
+                    show_user(answer);
+                    return false;
+                });
+            });
+            function show_user(answer){
+                let content = $('#user').clone();
+                let count = 0;
+                $.each(answer['data'], function () {
+                    if(count++ == 0) {
+                        $(content).find('#user_form p:last').after('<input type="'+ this.type +'" name="'+ this.name +'" value="'+ this.value +'" placeholder="'+ this.placeholder +'" />');
+                        $(content).find('#user_form input:last').after('<br />');
+                    }
+                    else {
+                        $(content).find('#user_form br:last').after('<input type="'+ this.type +'" name="'+ this.name +'" value="'+ this.value +'" placeholder="'+ this.placeholder +'" />');
+                        $(content).find('#user_form input:last').after('<br />');
+                    }
+                });
+                $(content).find('#user_form br:last').after('<input type="submit" name="submit" value="Отправить" />');
+                $('#main').html(content[0].outerHTML);
+            }
+            async function api_request(command, token, data=[]){
+                const json = {};
+                $.each(data, function () {
+                    json[this.name] = this.value || "";
+                });
+                let uri = "";
+                let method_type = "";
+                if( $.inArray( command, ['user_form', 'main_table', 'authorization'] ) >=0 ){
+                    method_type = "GET";
+                    if(command == 'authorization'){
+                        uri += "?r=admin/auth";
+                    }
+                    else if(command == 'user_form'){
+                        uri += "?r=user/view&token="+token;
+                    }
+                    else if(command == 'main_table'){
+                        uri += "?r=user/index&token="+token;
+                    }
+                }
+                else{
+                    method_type = "POST";
+                    if(command=='user_save'){
+                        uri += "?r=user/save&token="+token;
+                    }
+                    else if(command == 'deactuser'){
+                        uri += "?r=user/deact&token="+token;
+                    }
+                    else if(command == 'actuser'){
+                        uri += "?r=user/act&token="+token;
+                    }
+                    else if(command == 'editname'){
+                        uri += "?r=user/editname&token="+token;
+                    }
+                    else if(command == 'editlogin'){
+                        uri += "?r=user/editlogin&token="+token;
+                    }
+                    else if(command == 'deluser'){
+                        uri += "?r=user/del&token="+token;
+                    }
+                }
+                return await $.ajax({
+                    type: method_type,
+                    url: api_url+uri,
+                    data: json,
+                }).then(function(answ) {
+                    if(answ && typeof answ === 'object'){
+                        if(answ['status'] && answ['status'] == 'ok'){
+                            return answ;
+                        }
+                        else if(answ['status'] && answ['status'] == 'error'){
+                            if(answ['error_code'] == 1){
+                                $.removeCookie('token', { path: '/test/' });
+                                $('#auth_error').text('Ошибка авторизации');
+                                $('#main').html($('#auth_form')[0].outerHTML);
+                                return false;
+                            }
+                            else if(answ['error_code'] && answ['error_code'] == 2){
+                                $('#user_error').text('Введены неверные данные');
+                                return false;
+                            }
+                            else if(answ['error_code'] && answ['error_code'] == 3){
+                                alert('Пользователь не найден');
+                                return false;
+                            }
+                            else if(answ['error_code'] && answ['error_code'] == 4){
+                                alert('Для нового пользователя поле password не может быть пустым');
+                                return false;
+                            }
+                            else if(answ['error_code'] && answ['error_code'] == 5){
+                                alert('Поле name не может быть пустым');
+                                return false;
+                            }
+                            else if(answ['error_code'] && answ['error_code'] == 6){
+                                alert('Поле login не может быть пустым');
+                                return false;
+                            }
+                            else {
+                                return false;
+                            }
+                        }
+                        else {
+                            return false;
+                        }
+                    }
+                    else{// Если false, то какие-то проблемы с подключением
+                        $('#auth_error').text('Нет связи с сервером, попробуйте позже');
+                        $('#main').html($('#auth_form')[0].outerHTML);
+                        return false;
+                    }
+
+                }).fail(function(){
+                    return false;
+                });
+            }
+            function show_answer(answer){
+                let content = $('#' + doc).clone();
+                $.each(answer['data'], function () {
+                    let act = '';
+                    if(this.active) {
+                        act = '<a class="act" data-action="deactuser" href="#" data-id="'+ this.id +'">Deact</a>&nbsp;';
+                    }
+                    else {
+                        act = '<a class="act" data-action="actuser" href="#" data-id="'+ this.id +'">Act</a>&nbsp;';
+                    }
+                    
+                    $(content).find('#main_table tr:last').after('<tr><td><a class="act" href="#" data-action="editlogin" data-id="'+ this.id +'">'+ this.login +'</a></td><td><a class="act" data-action="editname" href="#" data-id="'+ this.id +'">'+ this.name +'</a></td><td>'+ act +'<a class="user_form" href="#" data-id="'+ this.id +'">View</a>&nbsp;<a class="act" data-action="deluser" href="#" data-id="'+ this.id +'">Delete</a></td></tr>');
+                });
+                $('#main').html(content[0].outerHTML);
+            }
+         </script>
+    </head>
+    <body>
+        <div style="display: none;">
+            <div id="auth_form">
+                <form action="" method="post" name="auth_form">
+                    <input type="text" name="login" placeholder="login" /> <br/>
+                    <input type="password" name="pwd" placeholder="password" /> <br/>
+                    <input type="submit" name="submit" value="Войти" /> <br/>
+                    <span style="color:red;" id="auth_error"></span>
+                </form>
+            </div>
+            <div id="user">
+                <p>Меню: <a href="#" class="go_back">Назад</a>&nbsp;|&nbsp;<a href="#" id="exit">Выйти</a></p>
+                <form action="" method="post" name="user_form" id="user_form" class="cform_user">
+                    <p>Добавить/редактировать пользователя:</p>
+                    <span style="color:red;" id="user_error"></span>
+                </form>
+            </div>
+            <div id="main_table_block">
+                <p>Меню: <a href="#" data-id="0" class="user_form">Add user</a>&nbsp;|&nbsp;<a href="#" id="exit">Выйти</a></p>
+                <table id="main_table">
+                    <tr>
+                        <td>Login</td>
+                        <td>Name</td>
+                        <td>Action</td>
+                    </tr>
+                </table>
+            </div>
+        </div>
+        <div id="main"></div>
+    </body>
+</html>
